@@ -57,7 +57,12 @@
     test-all
     analyze-all
     )
-  (import (except (rnrs) with-output-to-file current-output-port flush-output-port) (nanopass) (match) (d)
+  (import (except (rnrs) with-output-to-file current-output-port flush-output-port)
+          (nanopass)
+          ;; for experimental testing only
+          ; (except (nanopass) define-language)
+          ; (rename (nanopass exp-syntax) (define-language-exp define-language))
+          (match) (d)
     (only (chezscheme) trace-define trace-define-syntax trace-let trace-lambda
           format enumerate iota errorf fluid-let module with-implicit datum
           trace-define-syntax make-list printf pretty-print make-parameter
@@ -420,24 +425,11 @@
       (let ([ir (Expr ir)])
         (build-let datum-var* datum-e* ir))))
 
+  ;; NB: the following pass should not need to return anything, but the current
+  ;; framework makes it easier if it does.
   (define-pass uncover-assigned! : Ldatum (ir) -> Ldatum ()
-    ;; NB: (values) should not be necessary for these
-    (Expr! : Expr (ir) -> * ()
-      [(set! ,x ,[]) (var-flags-assigned-set! x #t) (values)]
-      ;; NB: clauses that should be unnecesary
-      [(quote ,i) (values)]
-      [,x (values)]
-      [(if ,[] ,[] ,[]) (values)]
-      [(begin ,[] ... ,[]) (values)]
-      [(lambda (,x* ...) ,[]) (values)]
-      [(letrec ([,x* ,[]] ...) ,[]) (values)]
-      [(let ([,x* ,[]] ...) ,[]) (values)]
-      [(,[] ,[] ...) (values)]
-      )
-    (Callable! : Callable (ir) -> * ()
-      [,pr (values)]
-      [,e (Expr! e)])
-    (begin (Expr! ir) ir))
+    (Expr : Expr (ir) -> Expr ()
+      [(set! ,x ,[e]) (var-flags-assigned-set! x #t) ir]))
 
   (define-language Lletrec
     (extends Ldatum)
