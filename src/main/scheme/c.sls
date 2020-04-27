@@ -56,6 +56,7 @@
     tests
     test-all
     analyze-all
+    use-llvm-10-tailcc
     )
   (import (except (rnrs) with-output-to-file current-output-port flush-output-port)
           (nanopass)
@@ -67,6 +68,8 @@
           format enumerate iota errorf fluid-let module with-implicit datum
           trace-define-syntax make-list printf pretty-print make-parameter
           void parameterize with-output-to-file current-output-port system eval flush-output-port))
+
+  (define use-llvm-10-tailcc (make-parameter #f (lambda (x) (and x #t))))
 
   ;;; helpers for the scheme-dependent portion of the compiler
   (define word-shift 3) ; 64-bit words
@@ -1915,6 +1918,8 @@
 
   (define-pass generate-llvm-code : Lflat-funcs (ir) -> * (void)
     (definitions
+      (define calling-convention
+        (if (use-llvm-10-tailcc) "tailcc" "fastcc"))
       (define (var-printable-name x) (format "%\"~s\"" (var-unique-name x)))
       (define (label-printable-name l)
         (if (local-label? l)
@@ -2076,7 +2081,7 @@
         (printf "~%"))
       (define (emit-main-function l)
         (printf "define i32 @main(i32, i8**) {~%")
-        (printf "  %result = call tailcc i64 ~a()~%" (label-printable-name l))
+        (printf "  %result = call ~a i64 ~a()~%" calling-convention (label-printable-name l))
         (printf "  call void @scheme_write(i64 %result)~%")
         (printf "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str.newline, i32 0, i32 0))~%")
         (printf "  ret i32 0~%")
@@ -2100,7 +2105,7 @@
       [(lambda (,x* ...) ,c* ... ,c) (label-slot-set! l x*)])
     (Lambda : Lambda (f l) -> * (void)
       [(lambda (,x* ...) ,c* ... ,c)
-       (printf "define tailcc i64 ~a(~{i64 ~a~^, ~}) {~%" (label-printable-name l) (map var-printable-name x*))
+       (printf "define ~a i64 ~a(~{i64 ~a~^, ~}) {~%" calling-convention (label-printable-name l) (map var-printable-name x*))
        (fold-left (lambda (i x) (var-slot-set! x i) (fx+ i 1)) 0 x*)
        (for-each Code c*)
        (Code c)
@@ -2116,11 +2121,11 @@
          (printf "  ~a = inttoptr i64 ~a to i64*~%" (var-printable-name ptr) (var-printable-name untagged))
          (printf "  store i64 ~a, i64* ~a, align 8~%" (printable-triv tr2) (var-printable-name ptr)))]
       [(call ,l ,tr* ...)
-       (printf "  call tailcc i64 ~a(~{i64 ~a~^, ~})~%" (label-printable-name l) (map printable-triv tr*))]
+       (printf "  call ~a i64 ~a(~{i64 ~a~^, ~})~%" calling-convention (label-printable-name l) (map printable-triv tr*))]
       [(call ,tr ,tr* ...)
        (let ([fptr (make-var 'fptr)])
          (printf "  ~a = inttoptr i64 ~a to i64 (~{i64~*~^, ~})*~%" (var-printable-name fptr) (printable-triv tr) tr*)
-         (printf "  call tailcc i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name fptr) (map printable-triv tr*)))]
+         (printf "  call ~a i64 ~a(~{i64 ~a~^, ~})~%" calling-convention (var-printable-name fptr) (map printable-triv tr*)))]
       [(goto ,l) (printf "  br label ~a~%" (label-printable-name l))]
       [(return ,tr) (printf "  ret i64 ~a~%" (printable-triv tr))]
       [(if (,relop ,tr0 ,tr1) (,l0) (,l1))
@@ -2145,17 +2150,17 @@
       [(,binop ,tr0 ,tr1)
        (printf "  ~a = ~a i64 ~a, ~a~%" (var-printable-name x) (binop-to-llvm binop) (printable-triv tr0) (printable-triv tr1))]
       [(tail-call ,l ,tr* ...)
-       (printf "  ~a = tail call tailcc i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) (label-printable-name l) (map printable-triv tr*))]
+       (printf "  ~a = tail call ~a i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) calling-convention (label-printable-name l) (map printable-triv tr*))]
       [(tail-call ,tr ,tr* ...)
        (let ([fptr (make-var 'fptr)])
          (printf "  ~a = inttoptr i64 ~a to i64 (~{i64~*~^, ~})*~%" (var-printable-name fptr) (printable-triv tr) tr*)
-         (printf "  ~a = tail call tailcc i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) (var-printable-name fptr) (map printable-triv tr*)))]
+         (printf "  ~a = tail call ~a i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) calling-convention (var-printable-name fptr) (map printable-triv tr*)))]
       [(call ,l ,tr* ...)
-       (printf "  ~a = call tailcc i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) (label-printable-name l) (map printable-triv tr*))]
+       (printf "  ~a = call ~a i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) calling-convention (label-printable-name l) (map printable-triv tr*))]
       [(call ,tr ,tr* ...)
        (let ([fptr (make-var 'fptr)])
          (printf "  ~a = inttoptr i64 ~a to i64 (~{i64~*~^, ~})*~%" (var-printable-name fptr) (printable-triv tr) tr*)
-         (printf "  ~a = call tailcc i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) (var-printable-name fptr) (map printable-triv tr*)))])
+         (printf "  ~a = call ~a i64 ~a(~{i64 ~a~^, ~})~%" (var-printable-name x) calling-convention (var-printable-name fptr) (map printable-triv tr*)))])
     (Program ir))
 
   (define (rewrite-result x)
