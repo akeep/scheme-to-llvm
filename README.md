@@ -69,7 +69,7 @@ target language, and `pr` is a primitive.
 | `fixnum?`       | 1       | any                 | boolean       |
 | `null?`         | 1       | any                 | boolean       |
 | `procedure?`    | 1       | any                 | boolean       |
-| --------------- | ------- | ------------------- | --------------|
+
 
 Building and Using the Compiler
 --------------------------------
